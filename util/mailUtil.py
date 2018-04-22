@@ -13,7 +13,7 @@ class UtilLog:
         print(msg)
 
 
-class MailUtil:
+class MailServer:
     # 发送邮箱的用户名
     username = ""
     # 发送邮箱的密码
@@ -26,32 +26,32 @@ class MailUtil:
     log = UtilLog()
 
     def __init__(self, username, password):
-        MailUtil.username = username
-        MailUtil.password = password
+        MailServer.username = username
+        MailServer.password = password
 
     # 开启邮件发送服务
     def startServer(self):
         try:
             # 校验发送邮箱的信息是否正确
-            if MailUtil.username == '':
+            if MailServer.username == '':
                 return 1, "开启服务失败，发送邮箱用户名为空"
-            if MailUtil.password == '':
+            if MailServer.password == '':
                 return 2, "开启服务失败，发送邮箱密码为空s"
 
             # 开启服务
             server = smtplib.SMTP()
-            smtp,port = MailUtil.getSMTPserver(MailUtil.username)
+            smtp,port = MailServer.getSMTPserver(MailServer.username)
             server.connect(smtp,port)
-            server.login(user=MailUtil.username, password=MailUtil.password)
-            MailUtil.server = server
-            MailUtil.log.info("邮件服务准备完毕")
+            server.login(user=MailServer.username, password=MailServer.password)
+            MailServer.server = server
+            MailServer.log.info("邮件服务准备完毕")
         except Exception as e:
-            MailUtil.log.error("准备邮件服务异常:{}".format(e))
+            MailServer.log.error("准备邮件服务异常:{}".format(e))
 
     # 关闭邮件发送服务
     def close(self):
-        if MailUtil.server is not None:
-            MailUtil.server.quit()
+        if MailServer.server is not None:
+            MailServer.server.quit()
 
     # 添加需要发送的mail
     # targetmail 目标邮箱地址 必须是有效的邮件地址
@@ -59,13 +59,13 @@ class MailUtil:
     def addMail(self, targetmail, content):
         try:
             msg = MIMEText(content, 'plain', "utf-8")
-            msg['From'] = MailUtil.username
+            msg['From'] = MailServer.username
             msg['To'] = targetmail
-            msg['Subject'] = Header(MailUtil.TITLE, "utf-8")
-            MailUtil.server.sendmail(MailUtil.username, targetmail, msg.as_string())
-            MailUtil.log.info("邮件发送成功")
+            msg['Subject'] = Header(MailServer.TITLE, "utf-8")
+            MailServer.server.sendmail(MailServer.username, targetmail, msg.as_string())
+            MailServer.log.info("邮件发送成功")
         except Exception as e:
-            MailUtil.log.error("发送邮件异常[{}],{},{}".format(targetmail,content, e))
+            MailServer.log.error("发送邮件异常[{}],{},{}".format(targetmail,content, e))
 
     # 校验地址是否为合法的邮箱地址
     @classmethod
@@ -87,9 +87,3 @@ class MailUtil:
         else:
             return "smtp." + mailendstr,25
 
-
-if __name__ == "__main__":
-    mail = MailUtil("发送邮箱","邮箱密码")
-    mail.startServer()
-    mail.addMail("接收邮箱", "邮件内容")
-    mail.close()

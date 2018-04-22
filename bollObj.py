@@ -1,8 +1,28 @@
-import sys
-from collections import Counter,deque,defaultdict
+from collections import defaultdict
 import codecs
-from concurrent.futures import ThreadPoolExecutor as Pool
 import math
+from stock.util.mailUtil import MailServer
+
+class JudgeResult:
+    # 买入
+    BUY = 1
+    # 随时向上
+    R_UP = 2
+    # 随时突破
+    R_C = 3
+    # 给予关注
+    LOOK = 4
+    # 观望
+    N_LOOK = 5
+    # 随时向下
+    R_DOWN = 6
+    # 考虑卖掉
+    C_SALE = 7
+    # 卖掉
+    SALE = 8
+    # 数据第一天
+    FIRST = 9
+
 # 布林轨对象
 class BollObj:
     # 布林轨上轨
@@ -58,23 +78,23 @@ class BollObj:
         # 3.如果从下面涨到了安全下轨则提醒关注
         width = (self.UP - self.DOWN)/self.MID
         if width < 0.08 and self.CLOSE_PRICE > self.MID:
-            return "%s,股价随时可能向上突破 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"%self.TIME_SLOT
+            return JudgeResult.R_UP
         if width < 0.08 and self.CLOSE_PRICE <= self.MID:
-            return "%s,股价随时可能向下突破"%self.TIME_SLOT
+            return JudgeResult.R_DOWN
         if width < 0.1:
-            return "%s,股价随时可能突破"%self.TIME_SLOT
+            return JudgeResult.R_C
         if prestable is None:
-            return "数据第一天，观望"
+            return JudgeResult.FIRST
         if stable.q < 0 or self.CLOSE_PRICE > area_top:
-            return "%s,卖掉"%self.TIME_SLOT
+            return JudgeResult.SALE
         if self.CLOSE_PRICE > mid_area_top:
-            return "%s,考虑卖掉"%self.TIME_SLOT
+            return JudgeResult.C_SALE
         if prestable.q < 0 and self.CLOSE_PRICE > mid_area_bottom and stable.q > 0:
-            return "%s,买入 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"%self.TIME_SLOT
+            return JudgeResult.BUY
         if self.CLOSE_PRICE > area_bottom and stable.q > 0:
-            return "%s,给予关注"%self.TIME_SLOT
+            return JudgeResult.LOOK
         else:
-            return "%s,观望"%self.TIME_SLOT
+            return "{}#{}".format(JudgeResult.N_LOOK,self.TIME_SLOT)
 
 
 # boll趋势段
@@ -317,9 +337,8 @@ def analysisStock(code,name,start,end,writeutil,time="-"):
         for o in stable.getBolllist()[-5:]:
             result = o.getJudgeResult(stable, prestable,time)
             if result is not None:
-                content = "%s[%s]%s" % (name,code,result)
+                content = "%s#%s#%s#%s" % (name,code,time,result)
                 writeutil.write(content)
-                print(content)
         prestable = stable
 
 class WriteUtil:
@@ -327,22 +346,90 @@ class WriteUtil:
         self.file = codecs.open("analysis_%s.txt"%time,"a+",encoding="utf-8")
 
     def write(self,content):
+        # print(content)
         self.file.write(content+"\r\n")
 
     def close(self):
         self.file.close()
 
-if __name__ == "__main__":
-    codedict = defaultdict(None)
-    with codecs.open("code.txt","r",encoding="utf-8") as file:
-        for line in file:
-            code = line.strip().split(",")
-            if code is not None and len(code) > 0 and code[0][:3] != '300':
-                codedict[code[0]] = code[1]
-    writeutil = WriteUtil("2018-04-12")
-    with Pool(max_workers=20) as executor:
-        ft = [executor.submit(analysisStock,code,name,"2018-03-02","2018-04-15",writeutil,time="2018-04-12 15:00:00") for code,name in codedict.items()]
+class SortStockObj:
+    def __init__(self,code,name,time,level):
+        self.code = code
+        self.name = name
+        self.time = time
+        self.level = level
 
-    writeutil.close()
+    def level(self):
+        return int(self.level)
+
+    def __repr__(self):
+        # 对levle进行翻译
+        level = int(self.level)
+        explain = ""
+        if level == 1:
+            explain = "买入"
+        elif level == 2:
+            explain = "可能随时向上突破"
+        elif level == 3:
+            explain = "可能随时突破"
+        elif level == 4:
+            explain = "给予关注"
+        elif level == 5:
+            explain = "观望，不进行买卖"
+        elif level == 6:
+            explain = "可能随时向下突破"
+        elif level == 7:
+            explain = "考虑卖掉"
+        elif level == 8:
+            explain = "卖掉"
+        elif level == 9:
+            explain = "数据不足，该股不列入考虑"
+        else:
+            explain = "作壁上观"
+
+        return "{}[{}]{}:{}".format(self.name,self.code,self.time,explain)
+
+
+if __name__ == "__main__":
+    time = "2018-04-22"
+    filename = "analysis_%s.txt"%time
+    # 分析并写入文件
+    codedict = defaultdict(None)
+    # with codecs.open("code.txt","r",encoding="utf-8") as file:
+    #     for line in file:
+    #         code = line.strip().split(",")
+    #         if code is not None and len(code) > 0 and code[0][:3] != '300':
+    #             codedict[code[0]] = code[1]
+    # writeutil = WriteUtil(time)
+    # print(len(codedict))
+    # with Pool(max_workers=10) as executor:
+    #     ft = [executor.submit(analysisStock,code,name,"2018-03-02","2018-04-22",writeutil,time="2018-04-20 15:00:00") for code,name in codedict.items()]
+    # for f in ft:
+    #     if f.running():
+    #         print("%s正在运行"%(f.__func__))
+    # writeutil.close()
+    # 读取文件进行排序，然后发往指定邮箱
+    resultlist = []
+    with codecs.open(filename,"r",encoding="utf-8") as file:
+        for line in file:
+            #name,code,time,result
+            try:
+                line = line.strip()
+                rarr = line.split("#")
+                name = rarr[0]
+                code = rarr[1]
+                time = rarr[2]
+                r = rarr[3]
+                resultlist.append(SortStockObj(name,code,time,r))
+            except Exception as e:
+                print("解析结果文件出错:{}".format(e))
+    print("分析结果{}条".format(len(resultlist)))
+    # 对结果进行排序
+    content = ""
+    for i in sorted(resultlist,key=lambda a:a.level):
+        content += str(i) +"\r\n"
+    # 发送邮件
+    # TODO
     print("任务结束")
+
 
