@@ -1,7 +1,8 @@
 from collections import defaultdict
 import codecs
 import math
-from stock.util.mailUtil import MailServer
+from concurrent.futures import ThreadPoolExecutor as Pool
+# from stock.util.mailUtil import MailServer
 
 class JudgeResult:
     # 买入
@@ -78,21 +79,21 @@ class BollObj:
         # 3.如果从下面涨到了安全下轨则提醒关注
         width = (self.UP - self.DOWN)/self.MID
         if width < 0.08 and self.CLOSE_PRICE > self.MID:
-            return JudgeResult.R_UP
+            return JudgeResult.R_UP,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         if width < 0.08 and self.CLOSE_PRICE <= self.MID:
-            return JudgeResult.R_DOWN
+            return JudgeResult.R_DOWN,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         if width < 0.1:
-            return JudgeResult.R_C
+            return JudgeResult.R_C,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         if prestable is None:
-            return JudgeResult.FIRST
+            return JudgeResult.FIRST,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         if stable.q < 0 or self.CLOSE_PRICE > area_top:
-            return JudgeResult.SALE
+            return JudgeResult.SALE,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         if self.CLOSE_PRICE > mid_area_top:
-            return JudgeResult.C_SALE
+            return JudgeResult.C_SALE,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         if prestable.q < 0 and self.CLOSE_PRICE > mid_area_bottom and stable.q > 0:
-            return JudgeResult.BUY
+            return JudgeResult.BUY,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         if self.CLOSE_PRICE > area_bottom and stable.q > 0:
-            return JudgeResult.LOOK
+            return JudgeResult.LOOK,(area_top-self.CLOSE_PRICE)/self.CLOSE_PRICE
         else:
             return "{}#{}".format(JudgeResult.N_LOOK,self.TIME_SLOT)
 
@@ -335,9 +336,9 @@ def analysisStock(code,name,start,end,writeutil,time="-"):
     prestable = None
     for stable in resultdata:
         for o in stable.getBolllist()[-5:]:
-            result = o.getJudgeResult(stable, prestable,time)
+            result,pri = o.getJudgeResult(stable, prestable,time)
             if result is not None:
-                content = "%s#%s#%s#%s" % (name,code,time,result)
+                content = "%s#%s#%s#%s#%s" % (name,code,time,result,pri)
                 writeutil.write(content)
         prestable = stable
 
@@ -353,11 +354,15 @@ class WriteUtil:
         self.file.close()
 
 class SortStockObj:
-    def __init__(self,code,name,time,level):
+    def __init__(self,code,name,time,level,pri):
         self.code = code
         self.name = name
         self.time = time
         self.level = level
+        self.pri = pri
+
+    def pri(self):
+        return self.pri
 
     def level(self):
         return int(self.level)
@@ -395,19 +400,19 @@ if __name__ == "__main__":
     filename = "analysis_%s.txt"%time
     # 分析并写入文件
     codedict = defaultdict(None)
-    # with codecs.open("code.txt","r",encoding="utf-8") as file:
-    #     for line in file:
-    #         code = line.strip().split(",")
-    #         if code is not None and len(code) > 0 and code[0][:3] != '300':
-    #             codedict[code[0]] = code[1]
-    # writeutil = WriteUtil(time)
-    # print(len(codedict))
-    # with Pool(max_workers=10) as executor:
-    #     ft = [executor.submit(analysisStock,code,name,"2018-03-02","2018-04-22",writeutil,time="2018-04-20 15:00:00") for code,name in codedict.items()]
-    # for f in ft:
-    #     if f.running():
-    #         print("%s正在运行"%(f.__func__))
-    # writeutil.close()
+    with codecs.open("code.txt","r",encoding="utf-8") as file:
+        for line in file:
+            code = line.strip().split(",")
+            if code is not None and len(code) > 0 and code[0][:3] != '300':
+                codedict[code[0]] = code[1]
+    writeutil = WriteUtil(time)
+    print(len(codedict))
+    with Pool(max_workers=10) as executor:
+        ft = [executor.submit(analysisStock,code,name,"2018-03-02","2018-04-22",writeutil,time="2018-04-20 15:00:00") for code,name in codedict.items()]
+    for f in ft:
+        if f.running():
+            print("%s正在运行"%(f.__func__))
+    writeutil.close()
     # 读取文件进行排序，然后发往指定邮箱
     resultlist = []
     with codecs.open(filename,"r",encoding="utf-8") as file:
@@ -420,16 +425,18 @@ if __name__ == "__main__":
                 code = rarr[1]
                 time = rarr[2]
                 r = rarr[3]
-                resultlist.append(SortStockObj(name,code,time,r))
+                pri = rarr[4]
+                resultlist.append(SortStockObj(name,code,time,r,pri))
             except Exception as e:
                 print("解析结果文件出错:{}".format(e))
     print("分析结果{}条".format(len(resultlist)))
     # 对结果进行排序
     content = ""
-    for i in sorted(resultlist,key=lambda a:a.level):
+    for i in sorted(resultlist,key=lambda a:(a.level,-int(a.pri))):
         content += str(i) +"\r\n"
     # 发送邮件
     # TODO
+    print(content)
     print("任务结束")
 
 
